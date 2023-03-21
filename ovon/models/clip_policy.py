@@ -9,7 +9,9 @@ from habitat.tasks.nav.nav import EpisodicCompassSensor, EpisodicGPSSensor
 from habitat.tasks.nav.object_nav_task import ObjectGoalSensor
 from habitat_baselines.common.baseline_registry import baseline_registry
 from habitat_baselines.rl.ddppo.policy import PointNavResNetNet
-from habitat_baselines.rl.models.rnn_state_encoder import build_rnn_state_encoder
+from habitat_baselines.rl.models.rnn_state_encoder import (
+    build_rnn_state_encoder,
+)
 from habitat_baselines.rl.ppo import Net, NetPolicy
 from habitat_baselines.utils.common import get_num_actions
 from torch import nn as nn
@@ -61,7 +63,7 @@ class PointNavResNetCLIPPolicy(NetPolicy):
                 force_blind_policy=force_blind_policy,
                 discrete_actions=discrete_actions,
                 late_fusion=late_fusion,
-                add_clip_linear=add_clip_linear
+                add_clip_linear=add_clip_linear,
             ),
             action_space=action_space,
             policy_config=policy_config,
@@ -172,7 +174,10 @@ class PointNavResNetCLIPNet(Net):
         ):
             embedding_dim = 1024 if clip_model == "RN50" else 768
             if self.add_clip_linear:
-                self.obj_embedding = nn.Linear(embedding_dim, 32)
+                self.obj_embedding = nn.Sequential(
+                    nn.Linear(embedding_dim, 32),
+                    nn.ReLU(),
+                )
                 rnn_input_size += 32
             else:
                 rnn_input_size += embedding_dim
