@@ -19,5 +19,9 @@ export MAGNUM_LOG=quiet
 MAIN_ADDR=$(scontrol show hostnames "${SLURM_JOB_NODELIST}" | head -n 1)
 export MAIN_ADDR
 
-srun python ovon/dataset/generate_objectnav_dataset.py \
+srun python ovon/dataset/objectnav_generator.py \
   --split train \
+  --tasks-per-gpu 12 \
+  --start-poses-per-object 8000 \
+  --use-v1-scenes \
+  --multiprocessing
