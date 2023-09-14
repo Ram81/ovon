@@ -67,13 +67,15 @@ class PromptGenerator:
             response = openai.ChatCompletion.create(
                 model=model,
                 messages=[{"role": "user", "content": prompt}],
+                request_timeout=5,
+                timeout=5,
             )
         except Exception as e:
             response = None
-            print("Exception: {}".format(e))
+            print("Exception catched: {}".format(e))
         return response
 
-    def get_prompt(self, viewpoint: Dict[str, Any], type: str = "2d", keep: float = 0):
+    def get_prompt(self, viewpoint: Dict[str, Any], type: str = "2d"):
         PROMPT = ""
 
         objects_in_view = viewpoint["metadata"]
@@ -89,8 +91,8 @@ class PromptGenerator:
             objects_in_view = [obj for obj in objects_in_view if not obj["category"] == "wall"]
 
         prompt_args = {}
-        num_objects_to_sample = min(ceil(len(objects_in_view) * keep), 3)
-        #objects_in_view = objects_in_view[:num_objects_to_sample]
+        # num_objects_to_sample = min(ceil(len(objects_in_view) * keep), 3)
+        # objects_in_view = objects_in_view[:num_objects_to_sample]
 
         prompt_args[target_object["category"]] = target_object["bbox"]
         for obj in objects_in_view:
@@ -113,39 +115,58 @@ class PromptGenerator:
 
         return prompt
 
-    def generate(self, model: str = "gpt-3.5-turbo", use_openai_api: bool = True, prompt_type: str = "with_captions"):
-        drop_rate = [0.75,.25,.5]
+    def generate(
+        self,
+        model: str = "gpt-3.5-turbo",
+        use_openai_api: bool = True,
+        prompt_type: str = "with_captions",
+        output_path: str = ""
+    ):
         cnt = 0
         objects = 0
         annotated_viewpoints = {}
+
+        if os.path.exists(output_path):
+            annotated_viewpoints = load_json(output_path)
+
+        total_tokens = 0
+        total_ignored_viewpoints = 0
 
         for uuid, vp in tqdm(self.viewpoints.items()):
             viewpoint = deepcopy(vp)
             viewpoint["instructions"] = {}
 
-            for d in drop_rate:
-                prompt = self.get_prompt(viewpoint, keep=d, type=prompt_type)
+            # Ignore already annotated viewpoints
+            if uuid in annotated_viewpoints:
+                total_ignored_viewpoints += 1
+                continue
 
-                print(prompt, vp["annotate_observation"])
-                print("\n\n")
-                if use_openai_api:
-                    response = self.gpt_call(model=model, prompt=prompt)
+            prompt = self.get_prompt(viewpoint, type=prompt_type)
 
-                    if response is None:
-                        viewpoint["instructions"][f"@{1-d}"] = "API_failure"
-                        cnt += 1
-                        print("API Call failed!")
-                    else:
-                        viewpoint["instructions"][f"@{1-d}"] = response["choices"][0]["message"][
-                            "content"
-                        ]
+            print(prompt, vp["annotate_observation"])
+            print("\n\n")
+            if use_openai_api:
+                response = self.gpt_call(model=model, prompt=prompt)
+                if response is None:
+                    viewpoint["instructions"][f"@{1}"] = "API_failure"
+                    cnt += 1
+                    print("API Call failed!")
                 else:
-                    raise NotImplementedError
-                break
+                    viewpoint["instructions"][f"@{1}"] = response["choices"][0]["message"][
+                        "content"
+                    ]
+                    total_tokens += response["usage"]["total_tokens"]
+            else:
+                raise NotImplementedError
             objects += 1
             annotated_viewpoints[uuid] = viewpoint
-            time.sleep(0.2)
+
+            # Save partial annotations
+            self.save_to_disk(annotated_viewpoints, output_path)
+            time.sleep(0.3)
         print(f"API call failed for {cnt} out of {len(self.viewpoints)} objects!")
+        print(f"Total tokens used: {total_tokens}")
+        print(f"Total ignored viewpoints: {total_ignored_viewpoints}")
         return annotated_viewpoints
 
     def save_to_disk(self, data, path):
@@ -155,11 +176,23 @@ class PromptGenerator:
 def main(args):
     viewpoints = load_json(args.path)
 
+    if os.path.exists(args.output_path):
+        annotated_viewpoints = load_json(args.output_path)
+        uuids = set(list(annotated_viewpoints.keys()))
+        vp_uuids = set(list(viewpoints.keys()))
+        if len(vp_uuids.difference(uuids)) == 0:
+            print("All viewpoints are annotated!")
+            return
+
     prompt_generator = PromptGenerator(
         viewpoints=viewpoints,
     )
 
-    viewpoint_annotations = prompt_generator.generate(prompt_type=args.prompt)
+    viewpoint_annotations = prompt_generator.generate(
+        model=args.model,
+        prompt_type=args.prompt,
+        output_path=args.output_path
+    )
     prompt_generator.save_to_disk(viewpoint_annotations, args.output_path)
 
 
@@ -169,7 +202,11 @@ if __name__ == "__main__":
     parser.add_argument("--path", type=str)
     parser.add_argument("--output-path", type=str)
     parser.add_argument("--prompt", type=str, default="with_captions_multi")
+    parser.add_argument("--model", type=str, default="gpt-3.5-turbo")
 
     args = parser.parse_args()
-    
+
+    print("API token: {}".format(os.environ.get("OPENAI_APIKEY", "")))
+    print("INput: {}".format(args.path))
+
     main(args)

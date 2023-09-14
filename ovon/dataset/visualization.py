@@ -2,6 +2,7 @@ import os
 from typing import Any, Dict, List
 
 import cv2
+import imageio
 import numpy as np
 import torch
 from habitat.tasks.utils import compute_pixel_coverage
