@@ -26,6 +26,7 @@ There are some rules:
 Don't use any absolute values of the numbers, only use relative directions. Do not show bounding box coordinates in the output. Think of giving this as an instruction to a robot agent based on the given details. Add a prefix "Instruction: Find the .." or "Instruction: Go to .." to the generated instruction. Generate only a one or two line instructions.
 """
 
+# Generate an informative and natural one sentence instruction based on the given information(a,b):
 
 PROMPT_WITH_DESCRIPTION_MULTI = """
 Generate an informative and natural instruction to a robot agent based on the given information(a,b):
@@ -36,6 +37,16 @@ There are some rules:
 Don't use any absolute values of the numbers, only use relative directions. Do not show bounding box coordinates in the output. Think of giving this as an instruction to a robot agent based on the given details. Add a prefix "Instruction: Find the .." or "Instruction: Go to .." to the generated instruction.
 """
 
+# PROMPT_SINGLE_LINE = """
+# Here's an instruction given to a household robot to find {} using "{}".
+
+# Convert this instruction into a single line instruction. Replace the references to left and right.
+# """
+PROMPT_SINGLE_LINE = """
+"{}".
+
+Summarize this instruction in one sentence. Start with 'It is'.
+"""
 
 PROMPT_3D = """
 {}
@@ -48,6 +59,8 @@ PROMPT_BOTH = """
 Based on this dictionary which contains information about 3d bounding boxes of objects with center in (x,y,z) and size of the bounding box along x,y,z axes given in sizes_x_y_z and 2d bounding boxes given in the form of (xmin,ymin,xmax,ymax) in this particular view,
 write an language instruction describing the location of {} spatially relative to other objects as references. Don't use any absolute values of the numbers, only use relative directions. Think of it as giving an instruction to a robot agent based on these coordinates.
 """
+
+MAX_INSTRUCTION_TOKENS = 50
 
 class PromptGenerator:
     def __init__(
@@ -76,6 +89,9 @@ class PromptGenerator:
         return response
 
     def get_prompt(self, viewpoint: Dict[str, Any], type: str = "2d"):
+        if type == "single_line":
+            assert viewpoint.get("instructions") is not None, "No instructions found in prompt metadata!"
+
         PROMPT = ""
 
         objects_in_view = viewpoint["metadata"]
@@ -85,14 +101,11 @@ class PromptGenerator:
         objects_in_view = sorted(objects_in_view, key=lambda x: x["area"], reverse=True)
 
         print(target_object)
-
-        # Drop wall from objects in view randomly
-        if random.random() < 0.5:
-            objects_in_view = [obj for obj in objects_in_view if not obj["category"] == "wall"]
-
         prompt_args = {}
         # num_objects_to_sample = min(ceil(len(objects_in_view) * keep), 3)
         # objects_in_view = objects_in_view[:num_objects_to_sample]
+        num_objects_to_sample = random.choice([2, 3])
+        objects_in_view = objects_in_view[:num_objects_to_sample]
 
         prompt_args[target_object["category"]] = target_object["bbox"]
         for obj in objects_in_view:
@@ -104,16 +117,26 @@ class PromptGenerator:
             PROMPT = PROMPT_WITH_DESCRIPTION
         elif type == "with_captions_multi":
             PROMPT = PROMPT_WITH_DESCRIPTION_MULTI
+        elif type == "single_line":
+            PROMPT = PROMPT_SINGLE_LINE
         else:
             raise NotImplementedError
-        
-        print(viewpoint.keys())
 
         description = target_object["category"] + ": " + viewpoint["target_description"][0]
 
-        prompt = PROMPT.format(prompt_args, description, target_object["category"])
+        if type == "single_line":
+            description = target_object["category"] + " with description \"" + viewpoint["target_description"][0] + "\""
+            prompt = PROMPT.format(viewpoint["instructions"]["@1"])
+        else:
+            prompt = PROMPT.format(prompt_args, description, target_object["category"])
 
         return prompt
+
+    def _is_instruction_tuned(self, instruction: str):
+        # instruction_tokens = instruction.split(" ")
+        # if len(instruction_tokens) < MAX_INSTRUCTION_TOKENS:
+        #     return True
+        return False
 
     def generate(
         self,
@@ -134,7 +157,10 @@ class PromptGenerator:
 
         for uuid, vp in tqdm(self.viewpoints.items()):
             viewpoint = deepcopy(vp)
-            viewpoint["instructions"] = {}
+
+            # Only annotate viewpoints without instructions
+            if prompt_type != "single_line":
+                viewpoint["instructions"] = {}
 
             # Ignore already annotated viewpoints
             if uuid in annotated_viewpoints:
@@ -145,6 +171,11 @@ class PromptGenerator:
 
             print(prompt, vp["annotate_observation"])
             print("\n\n")
+
+            if prompt_type == "single_line" and self._is_instruction_tuned(viewpoint["instructions"]["@1"]):
+                annotated_viewpoints[uuid] = viewpoint
+                continue
+
             if use_openai_api:
                 response = self.gpt_call(model=model, prompt=prompt)
                 if response is None:

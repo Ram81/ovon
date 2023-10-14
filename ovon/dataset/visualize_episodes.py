@@ -17,8 +17,8 @@ SCENES_ROOT = "data/scene_datasets/hm3d"
 MAP_RESOLUTION = 512
 
 
-def get_objnav_config(scene):
-    TASK_CFG = "config/tasks/objectnav_stretch_hm3d.yaml"
+def get_objnav_config(scene, config: str = "config/tasks/objectnav_stretch_hm3d.yaml"):
+    TASK_CFG = config
     SCENE_DATASET_CFG = os.path.join(
         SCENES_ROOT, "hm3d_annotated_basis.scene_dataset_config.json"
     )
@@ -54,8 +54,6 @@ def get_sim(objnav_config):
     navmesh_settings.agent_height = (
         objnav_config.habitat.simulator.agents.main_agent.height
     )
-    navmesh_settings.agent_radius = 0.18
-    navmesh_settings.agent_height = 0.88
     sim.recompute_navmesh(
         sim.pathfinder, navmesh_settings, include_static_objects=True
     )

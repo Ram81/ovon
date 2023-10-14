@@ -52,6 +52,10 @@ def load_pickle(path):
     return data
 
 
+def load_image(file_name):
+    return Image.open(file_name).convert("RGB")
+
+
 def write_dataset(data, path):
     with gzip.open(path, "wt") as f:
         json.dump(data, f)

@@ -312,6 +312,9 @@ class LanguageGoalGenerator(ObjectGoalGenerator):
                 if prompt is None:
                     continue
 
+                if "failure" in prompt["instructions"]["@1"].lower():
+                    continue
+
                 (
                     start_positions,
                     start_rotations,
