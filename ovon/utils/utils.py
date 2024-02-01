@@ -6,12 +6,11 @@ import pickle
 from collections import defaultdict
 
 import numpy as np
-import torch
 from habitat.utils.visualizations import maps
 from PIL import Image
 from tqdm import tqdm
 
-from ovon.models.encoders.resnet_gn import ResNet
+# from ovon.models.encoders.resnet_gn import ResNet
 
 
 def write_json(data, path):
@@ -128,14 +127,14 @@ def draw_bounding_box(
     return top_down_map
 
 
-def load_encoder(encoder, path):
-    assert os.path.exists(path)
-    if isinstance(encoder.backbone, ResNet):
-        state_dict = torch.load(path, map_location="cpu")["teacher"]
-        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
-        return encoder.load_state_dict(state_dict=state_dict, strict=False)
-    else:
-        raise ValueError("unknown encoder backbone")
+# def load_encoder(encoder, path):
+#     assert os.path.exists(path)
+#     if isinstance(encoder.backbone, ResNet):
+#         state_dict = torch.load(path, map_location="cpu")["teacher"]
+#         state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+#         return encoder.load_state_dict(state_dict=state_dict, strict=False)
+#     else:
+#         raise ValueError("unknown encoder backbone")
 
 
 def count_episodes(path):

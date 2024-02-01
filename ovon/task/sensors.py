@@ -1,4 +1,5 @@
 import hashlib
+import pickle
 import random
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -11,8 +12,6 @@ from habitat.tasks.nav.nav import NavigationEpisode
 
 cv2 = try_cv2_import()
 
-
-from ovon.utils.utils import load_pickle
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig
@@ -42,7 +41,7 @@ class ClipObjectGoalSensor(Sensor):
         config: "DictConfig",
         **kwargs: Any,
     ):
-        self.cache = load_pickle(config.cache)
+        self.cache = pickle.load(open(config.cache, "rb"))
         super().__init__(config=config)
 
     def _get_uuid(self, *args: Any, **kwargs: Any) -> str:

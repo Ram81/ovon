@@ -1,3 +1,4 @@
+import os
 from collections import OrderedDict
 from typing import Dict, List, Optional, Tuple
 
@@ -7,6 +8,7 @@ import torch.nn as nn
 from gym import spaces
 from habitat import logger
 from habitat.tasks.nav.nav import EpisodicCompassSensor, EpisodicGPSSensor
+from habitat.tasks.nav.object_nav_task import ObjectGoalSensor
 from habitat_baselines.common.baseline_registry import baseline_registry
 from habitat_baselines.rl.ddppo.policy import PointNavResNetNet, resnet
 from habitat_baselines.rl.models.rnn_state_encoder import build_rnn_state_encoder
@@ -17,12 +19,12 @@ from torchvision import transforms as T
 from ovon.models.encoders.cross_attention import CrossAttention
 from ovon.models.encoders.dinov2_encoder import DINOV2Encoder
 from ovon.models.encoders.habitat_resnet import HabitatResNetEncoder
+from ovon.models.encoders.resnet_gn import ResNet
 from ovon.models.encoders.vc1_encoder import VC1Encoder
 from ovon.models.encoders.visual_encoder import VisualEncoder
 from ovon.models.encoders.visual_encoder_v2 import VisualEncoder as VisualEncoderV2
 from ovon.models.transforms import get_transform
 from ovon.task.sensors import ClipObjectGoalSensor
-from ovon.utils.utils import load_encoder
 
 
 class FusionTypes:
@@ -37,6 +39,16 @@ class FusionTypes:
             cls.XATTN,
             cls.XATTN_CONCAT,
         ]
+
+
+def load_encoder(encoder, path):
+    assert os.path.exists(path)
+    if isinstance(encoder.backbone, ResNet):
+        state_dict = torch.load(path, map_location="cpu")["teacher"]
+        state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+        return encoder.load_state_dict(state_dict=state_dict, strict=False)
+    else:
+        raise ValueError("unknown encoder backbone")
 
 
 class OVRLPolicyNet(Net):
@@ -191,6 +203,13 @@ class OVRLPolicyNet(Net):
                 rnn_input_size_info["clip_goal"] = clip_embedding
             elif self.fusion_type in [FusionTypes.XATTN, FusionTypes.XATTN_CONCAT]:
                 cross_attention_inputs["clip_goal"] = clip_embedding
+        elif ObjectGoalSensor.cls_uuid in observation_space.spaces:
+            self._n_object_categories = (
+                int(observation_space.spaces[ObjectGoalSensor.cls_uuid].high[0]) + 1
+            )
+            self.obj_categories_embedding = nn.Embedding(self._n_object_categories, 32)
+            rnn_input_size_info["obj_goal"] = 32
+            rnn_input_size += 32
 
         if EpisodicGPSSensor.cls_uuid in observation_space.spaces:
             input_gps_dim = observation_space.spaces[EpisodicGPSSensor.cls_uuid].shape[
@@ -283,19 +302,25 @@ class OVRLPolicyNet(Net):
         visual_feats = self.visual_fc(visual_feats)
         aux_loss_state["perception_embed"] = visual_feats
 
-        assert ClipObjectGoalSensor.cls_uuid in observations
-        object_goal = observations[ClipObjectGoalSensor.cls_uuid].float().cuda()
-        if self.add_clip_linear_projection:
-            object_goal = self.obj_categories_embedding(object_goal)
+        if ClipObjectGoalSensor.cls_uuid in observations:
+            assert ClipObjectGoalSensor.cls_uuid in observations
+            object_goal = observations[ClipObjectGoalSensor.cls_uuid].float().cuda()
+            if self.add_clip_linear_projection:
+                object_goal = self.obj_categories_embedding(object_goal)
 
-        if self.fusion_type in [FusionTypes.CONCAT, FusionTypes.XATTN_CONCAT]:
+            if self.fusion_type in [FusionTypes.CONCAT, FusionTypes.XATTN_CONCAT]:
+                x.append(visual_feats)
+                if self.fusion_type == FusionTypes.CONCAT:
+                    x.append(object_goal)
+            if self.fusion_type in [FusionTypes.XATTN, FusionTypes.XATTN_CONCAT]:
+                assert object_goal is not None
+                cross_attention = self.cross_attention(object_goal, visual_feats)
+                x.append(cross_attention)
+        elif ObjectGoalSensor.cls_uuid in observations:
             x.append(visual_feats)
-            if self.fusion_type == FusionTypes.CONCAT:
-                x.append(object_goal)
-        if self.fusion_type in [FusionTypes.XATTN, FusionTypes.XATTN_CONCAT]:
-            assert object_goal is not None
-            cross_attention = self.cross_attention(object_goal, visual_feats)
-            x.append(cross_attention)
+            object_goal = observations[ObjectGoalSensor.cls_uuid].float().cuda()
+            object_goal = self.obj_categories_embedding(object_goal.long()).squeeze(1)
+            x.append(object_goal)
 
         if EpisodicCompassSensor.cls_uuid in observations:
             compass_observations = torch.stack(

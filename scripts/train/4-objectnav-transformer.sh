@@ -13,10 +13,6 @@
 #SBATCH --partition=cvmlp-lab,overcap
 #SBATCH --qos=short
 
-# Copyright (c) Meta Platforms, Inc. and its affiliates.
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
-
 export GLOG_minloglevel=2
 export MAGNUM_LOG=quiet
 export HABITAT_SIM_LOG=quiet
@@ -32,8 +28,8 @@ cd /srv/flash1/rramrakhya3/spring_2023/ovon
 
 export PYTHONPATH=
 
-TENSORBOARD_DIR="tb/objectnav/ddppo/vc1_llama/seed_5/"
-CHECKPOINT_DIR="data/new_checkpoints/objectnav/ddppo/vc1_llama/seed_5/"
+TENSORBOARD_DIR="tb/objectnav/ddppo/vc1_llama/seed_4_creset/"
+CHECKPOINT_DIR="data/new_checkpoints/objectnav/ddppo/vc1_llama/seed_4_creset/"
 DATA_PATH="data/datasets/objectnav/hm3d/v2"
 
 srun python ovon/run.py --exp-config config/experiments/rl_transformer_hm3d.yaml \

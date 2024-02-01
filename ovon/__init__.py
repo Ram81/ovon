@@ -1,4 +1,4 @@
-from ovon import config
+from ovon import config, utils
 from ovon.dataset import ovon_dataset
 from ovon.measurements import collision_penalty, nav, sum_reward
 from ovon.models import clip_policy, objaverse_clip_policy, ovrl_policy

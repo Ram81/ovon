@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from gym import spaces
 from habitat.tasks.nav.nav import EpisodicCompassSensor, EpisodicGPSSensor
+from habitat.tasks.nav.object_nav_task import ObjectGoalSensor
 from habitat_baselines.common.baseline_registry import baseline_registry
 from habitat_baselines.rl.ddppo.policy import PointNavResNetNet
 from habitat_baselines.rl.models.rnn_state_encoder import build_rnn_state_encoder
@@ -335,6 +336,13 @@ class OVONNet(Net):
             self.gps_embedding = nn.Linear(input_gps_dim, 32)
             rnn_input_size_info["gps_embedding"] = 32
 
+        if ObjectGoalSensor.cls_uuid in observation_space.spaces:
+            self._n_object_categories = (
+                int(observation_space.spaces[ObjectGoalSensor.cls_uuid].high[0]) + 1
+            )
+            self.obj_categories_embedding = nn.Embedding(self._n_object_categories, 32)
+            rnn_input_size_info["object_goal"] = 32
+
         # Optional cross-attention layer
         if self._fusion_type.concat:
             rnn_input_size_info["visual_feats"] = visual_feats_size
@@ -364,24 +372,26 @@ class OVONNet(Net):
         else:
             raise NotImplementedError(f"Unknown fusion type: {fusion_type}")
 
-        assert ClipObjectGoalSensor.cls_uuid in observation_space.spaces
-        if not self._fusion_type.late_fusion and not self._fusion_type.xattn:
+        if (
+            not self._fusion_type.late_fusion
+            and not self._fusion_type.xattn
+            and ClipObjectGoalSensor.cls_uuid in observation_space.spaces
+        ):
             rnn_input_size_info["clip_goal"] = clip_embedding_size
 
+        print("Fusion type:", self._fusion_type)
+
         # Report the type and sizes of the inputs to the RNN
-        rnn_input_size = sum(rnn_input_size_info.values())
+        self.rnn_input_size = sum(rnn_input_size_info.values())
         print("RNN input size info: ")
         for k, v in rnn_input_size_info.items():
             print(f"  {k}: {v}")
-        total_str = f"  Total RNN input size: {rnn_input_size}"
+        total_str = f"  Total RNN input size: {self.rnn_input_size}"
         print("  " + "-" * (len(total_str) - 2) + "\n" + total_str)
 
-        self.state_encoder = build_rnn_state_encoder(
-            rnn_input_size,
-            self._hidden_size,
-            rnn_type=rnn_type,
-            num_layers=num_recurrent_layers,
-        )
+        self.rnn_type = rnn_type
+        self._num_recurrent_layers = num_recurrent_layers
+        self.state_encoder = self.build_state_encoder()
 
         if self._fusion_type.late_fusion:
             self.late_fusion_fc = nn.Sequential(
@@ -407,6 +417,14 @@ class OVONNet(Net):
     def perception_embedding_size(self):
         return self._hidden_size
 
+    def build_state_encoder(self):
+        return build_rnn_state_encoder(
+            self.rnn_input_size,
+            self._hidden_size,
+            rnn_type=self.rnn_type,
+            num_layers=self._num_recurrent_layers,
+        )
+
     def forward(
         self,
         observations: Dict[str, torch.Tensor],
@@ -428,7 +446,12 @@ class OVONNet(Net):
             visual_feats = self.visual_encoder(observations)
 
         visual_feats = self.visual_fc(visual_feats)
-        object_goal = observations[ClipObjectGoalSensor.cls_uuid]
+
+        if ObjectGoalSensor.cls_uuid in observations:
+            object_goal = observations[ObjectGoalSensor.cls_uuid].long()
+            object_goal = self.obj_categories_embedding(object_goal).squeeze(dim=1)
+        elif ClipObjectGoalSensor.cls_uuid in observations:
+            object_goal = observations[ClipObjectGoalSensor.cls_uuid]
 
         if self._fusion_type.xattn:
             visual_feats = self.cross_attention(object_goal, visual_feats)
